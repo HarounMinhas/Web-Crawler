@@ -18,7 +18,7 @@ class DeterministicCrawler:
 
     def crawl(self) -> list[CrawlResult]:
         origin = str(self._config.seed_url)
-        host = urlparse(origin).netloc
+        host = self._normalize_host(origin)
         queue: deque[tuple[str, int]] = deque([(origin, 0)])
         visited: set[str] = set()
         output: list[CrawlResult] = []
@@ -31,7 +31,19 @@ class DeterministicCrawler:
                     continue
 
                 visited.add(current_url)
-                response = client.get(current_url)
+                try:
+                    response = client.get(current_url)
+                except httpx.RequestError:
+                    output.append(
+                        CrawlResult(
+                            url=current_url,
+                            depth=depth,
+                            status_code=0,
+                            title="",
+                        )
+                    )
+                    continue
+
                 title = self._extract_title(response.text)
                 output.append(
                     CrawlResult(
@@ -60,10 +72,18 @@ class DeterministicCrawler:
             href = anchor.get("href")
             if isinstance(href, str) and href:
                 links.add(self._normalize_url(urljoin(base_url, href)))
-        filtered = [url for url in links if urlparse(url).netloc == host]
+        filtered = [url for url in links if self._normalize_host(url) == host]
         return sorted(filtered)
 
     def _normalize_url(self, url: str) -> str:
         parsed = urlparse(url)
         path = parsed.path or "/"
         return parsed._replace(fragment="", query="", path=path).geturl()
+
+    def _normalize_host(self, url: str) -> str:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        port = parsed.port
+        if port is None:
+            return hostname.lower()
+        return f"{hostname.lower()}:{port}"
